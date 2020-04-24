@@ -43,7 +43,7 @@ int main(int argc, char* argv[]) {
   int numProcesses, rankNum;
 
   double start=omp_get_wtime();
-
+  int count = 0;
   /* input size of system */
   num = atoi(argv[1]);
   timesteps = atoi(argv[2]);
@@ -79,6 +79,7 @@ int main(int argc, char* argv[]) {
   }
   totalMass = 0.0;
   for (i=0; i<num; i++) {
+    
     totalMass += mass[i];
   }
   meanEnergy = calc_mean_energy(totalMass, vx, vy, vz, num);
@@ -128,11 +129,11 @@ int main(int argc, char* argv[]) {
   // There is no cross fetching so this whole loop can be done in parrallel
   //printf("about to start running the loop \n");
   for (time=1; time<=timesteps; time++) {
+    int counter = 0;
     for(i=(rankNum * moleculesPerProcess); i<((rankNum * moleculesPerProcess) + moleculesPerProcess -1); i++) {
       //remove nested loop and replace all i for ranknum
       // calc potential new position
-      int counter = 0;
-
+      
       new_x = x[i] + vx[i];
       new_y = y[i] + vy[i];
       new_z = z[i] + vz[i];
@@ -164,7 +165,11 @@ int main(int argc, char* argv[]) {
         z_buffer[counter] = new_z;
         vz_buffer[counter] = vz[i];
       }
-
+      counter = counter + 1;
+      // if(time == 2) {
+      //   printf("%.6f,", vx[i]);
+      // }
+      
     }
 
       //Order is always x y z
@@ -197,6 +202,15 @@ int main(int argc, char* argv[]) {
         MPI_Bcast(vy, num, MPI_FLOAT, 0, MPI_COMM_WORLD);
         MPI_Bcast(vx, num, MPI_FLOAT, 0, MPI_COMM_WORLD);
       }  else {
+        
+        int tempi = 0;
+        if (count == 0) {
+          for(tempi; tempi < moleculesPerProcess; tempi++){
+            printf("%.6f,", vz_buffer[tempi]);
+          }
+        }
+        count++;
+
         x_rbuf =  (float *) malloc(num * sizeof(float));
         y_rbuf =  (float *) malloc(num * sizeof(float));
         z_rbuf =  (float *) malloc(num * sizeof(float));
@@ -218,7 +232,10 @@ int main(int argc, char* argv[]) {
         vx = vx_rbuf;
         vy = vy_rbuf;
         vz = vz_rbuf;
-
+        
+        int tempcount = 0;
+        
+        
 
         MPI_Bcast(x_rbuf, num, MPI_FLOAT, 0, MPI_COMM_WORLD);
         MPI_Bcast(y_rbuf, num, MPI_FLOAT, 0, MPI_COMM_WORLD);
@@ -265,17 +282,54 @@ int main(int argc, char* argv[]) {
               vx[currMolecule] = -vx[currMolecule];
               vy[currMolecule] = -vy[currMolecule];
               vz[currMolecule] = -vz[currMolecule];
+              
             }
           }
         }
       }
+
+    if (rankNum>0) {
+      //printf("the problem is with non rank 0 gather rank=%d \n", rankNum);
+      MPI_Gather(&x_buffer, moleculesPerProcess, MPI_FLOAT, &x_rbuf, moleculesPerProcess, MPI_FLOAT, 0, MPI_COMM_WORLD);
+      MPI_Gather(&y_buffer, moleculesPerProcess, MPI_FLOAT, NULL, moleculesPerProcess, MPI_FLOAT, 0, MPI_COMM_WORLD);
+      MPI_Gather(&z_buffer, moleculesPerProcess, MPI_FLOAT, NULL, moleculesPerProcess, MPI_FLOAT, 0, MPI_COMM_WORLD);
+      MPI_Gather(&vx_buffer, moleculesPerProcess, MPI_FLOAT, NULL, moleculesPerProcess, MPI_FLOAT, 0, MPI_COMM_WORLD);
+      MPI_Gather(&vx_buffer, moleculesPerProcess, MPI_FLOAT, NULL, moleculesPerProcess, MPI_FLOAT, 0, MPI_COMM_WORLD);
+      MPI_Gather(&vx_buffer, moleculesPerProcess, MPI_FLOAT, NULL, moleculesPerProcess, MPI_FLOAT, 0, MPI_COMM_WORLD);
+    }  else {
+      x_rbuf =  (float *) malloc(num * sizeof(float));
+      y_rbuf =  (float *) malloc(num * sizeof(float));
+      z_rbuf =  (float *) malloc(num * sizeof(float));
+      vx_rbuf = (float *) malloc(num * sizeof(float));
+      vy_rbuf = (float *) malloc(num * sizeof(float));
+      vz_rbuf = (float *) malloc(num * sizeof(float));
+      // Gathering from each process
+      MPI_Gather(&x_buffer, moleculesPerProcess, MPI_FLOAT, x_rbuf, moleculesPerProcess, MPI_FLOAT, 0, MPI_COMM_WORLD);
+      MPI_Gather(&y_buffer, moleculesPerProcess, MPI_FLOAT, y_rbuf, moleculesPerProcess, MPI_FLOAT, 0, MPI_COMM_WORLD);
+      MPI_Gather(&z_buffer, moleculesPerProcess, MPI_FLOAT, z_rbuf, moleculesPerProcess, MPI_FLOAT, 0, MPI_COMM_WORLD);
+      MPI_Gather(&vx_buffer, moleculesPerProcess, MPI_FLOAT, vx_rbuf, moleculesPerProcess, MPI_FLOAT, 0, MPI_COMM_WORLD);
+      MPI_Gather(&vx_buffer, moleculesPerProcess, MPI_FLOAT, vy_rbuf, moleculesPerProcess, MPI_FLOAT, 0, MPI_COMM_WORLD);
+      MPI_Gather(&vx_buffer, moleculesPerProcess, MPI_FLOAT, vz_rbuf, moleculesPerProcess, MPI_FLOAT, 0, MPI_COMM_WORLD);
+      // Gathering done will now broadcast to every process
+
+      x = x_rbuf;
+      y = y_rbuf;
+      z = z_rbuf;
+      vx = vx_rbuf;
+      vy = vy_rbuf;
+      vz = vz_rbuf;
+    }
+    
     } // gas molecules
 
+
+    MPI_Finalize();
     /*
       DEBUG: output position of a given molecule (e.g. number 0)
       output_position_molecule(x, y, z, 0);  // output only given molecule
     */
 
+   if (rankNum == 0) {
     meanEnergy = calc_mean_energy(totalMass, vx, vy, vz, num);
     printf("Time %d. Mean energy=%g\n", time, meanEnergy);
     //time steps
@@ -284,7 +338,7 @@ int main(int argc, char* argv[]) {
     printf("Time %d. Mean energy=%g\n", time, meanEnergy);
 
     printf("Time to init+solve %d molecules for %d timesteps is %g seconds\n", num, timesteps, omp_get_wtime()-start);
-
+  }
 } // main
 
 
